@@ -1,0 +1,69 @@
+>> Instruction Buffer --> list
+Read assembly code in by lines
+
+>> RATs --> list
+tag or value
+
+>> Reservation Station --> list 
+busy | op | tag_1st | value_1st | valid_1st | tag_2nd | value_2nd | valid_2nd | dest_tag 
+
+>> Functional Unit --> FIFO queue
+cycle | op | value1 | value2 | dest_tag
+
+>> Ld/Sd --> FIFO queue
+ldsd_tag | ready | op | address | data | dest_tag | immediate | reg_tag | reg_value | valid
+
+>> ld_sd_exe 
+busy | cycle | value1 | value2 | dest_tag 
+
+>> ld_sd_mem 
+busy | cycle | addr | dest_tag | data | op 
+
+>> cdb 
+valid | value | dest_tag
+
+>> ROB --> FIFO queue
+ROB_tag | PC | value | dest | issue | exe | mem | cdb | commit 
+
+======================================================================
+Additions (Bryan E. Tuck, Oct 2026). Records are now plain classes with the
+same field names; new fields:
+
+>> instruction (init.py) --> decoded assembly line
+op | text | dest | src1 | src2 | imm | base
+
+>> fu_result
+value | dest_tag | cycle            (cycle = when it was produced; it is
+                                     broadcast on the CDB the cycle after)
+
+>> Ld/Sd
+... | addr_cycle | committed | in_mem
+                                    (addr_cycle = when the address became
+                                     known; committed = 1 while a store's
+                                     memory write is in progress; in_mem = 1
+                                     while a load is in the memory port)
+
+>> ld_sd_mem
+... | entry | ldsd_entry            (the ROB entry and queue entry served)
+
+>> ROB
+ROB_tag | PC | op | value | dest_tag | ldsd_tag | issue | exe | mem | cdb |
+commit | ready                       (ready = 1 once the result has been
+                                     broadcast, or the branch has resolved)
+pred_taken | pred_target             branch: prediction made at issue
+taken | target | mispredicted        branch: outcome at the end of EX
+rat_int_snapshot | rat_fp_snapshot   branch: RAT checkpoint taken at issue
+squashed                             cycle in which the entry was squashed
+
+>> btb_entry (branch.py) --> list of 8, indexed by the word address mod 8
+valid | pc | target | taken          (taken = the one-bit predictor)
+
+>> cdb
+removed: wb.py broadcasts the oldest fu_result of the results queue
+
+>> PC
+PC | resume | next_rob | size_ROB
+   resume   = first cycle in which issue may continue after a misprediction
+   next_rob = running counter for ROB tags
+
+>> machine (machine.py) --> holds all of the above plus the configuration

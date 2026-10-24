@@ -1,0 +1,16 @@
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Instruction & ISSUE & EX & MEM & WB & COMMIT \\
+\midrule
+\code{Beq R1 R2 4} & 1 & 2--2 &  &  & 3 \\
+\code{Sub R5 R3 R1} & 4 & 5--5 &  & 6 & 7 \\
+\code{Sub.d F3 F2 F1} & 5 & 6--8 &  & 9 & 10 \\
+\code{Mult.d F4 F1 F2} & 6 & 7--16 &  & 17 & 18 \\
+\code{Beq R1 R3 4} & 7 & 8--8 &  &  & 19 \\
+\code{Addi R6 R0 1} & 8 & 9--9 &  & 10 & 20 \\
+\code{Add R7 R5 R6} & 9 & 11--11 &  & 12 & 21 \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Squashed (last column: cycle squashed)}} \\
+\emph{\code{Addi R4 R0 99}} & 2 &  &  &  & 2 \\
+\bottomrule
+\end{tabular}

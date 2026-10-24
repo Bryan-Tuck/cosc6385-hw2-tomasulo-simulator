@@ -1,0 +1,23 @@
+# Load/store queue: store-to-load forwarding (Ld F4, Ld F6, Ld F7), a load
+# that bypasses an older store to a different address (Ld F5), and loads that
+# wait for an older store's data (Ld F4, Ld F7).
+               # of rs   Cycles in EX   Cycles in Mem   # of FUs
+Integer adder     4          1                             1
+FP adder          3          3                             1
+FP multiplier     2         10                             1
+Load/store unit   6          1              4              1
+
+ROB entries = 16
+Issue width = 1
+R1=8, R2=8, F1=5.0
+Mem[8]=1.0, Mem[16]=2.0
+
+Ld F2 0(R1)
+Add.d F3 F2 F1
+Sd F3 0(R1)
+Ld F4 0(R2)
+Ld F5 8(R1)
+Addi R3 R1 8
+Sd F1 0(R3)
+Ld F6 0(R3)
+Ld F7 0(R1)

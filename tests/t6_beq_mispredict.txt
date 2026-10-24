@@ -1,0 +1,21 @@
+# Beq taken on a BTB miss (predicted not-taken, so the Addi R4 on the wrong
+# path is issued and squashed), then Beq not taken, plus Sub, Sub.d, Mult.d.
+# Offsets are in bytes: 4 = skip one instruction.
+               # of rs   Cycles in EX   Cycles in Mem   # of FUs
+Integer adder     4          1                             1
+FP adder          3          3                             1
+FP multiplier     2         10                             1
+Load/store unit   3          1              4              1
+
+ROB entries = 16
+Issue width = 1
+R1=5, R2=5, R3=7, F1=2.0, F2=3.0
+
+Beq R1 R2 4
+Addi R4 R0 99
+Sub R5 R3 R1
+Sub.d F3 F2 F1
+Mult.d F4 F1 F2
+Beq R1 R3 4
+Addi R6 R0 1
+Add R7 R5 R6

@@ -1,0 +1,21 @@
+# A 4-iteration loop that sums Mem[0..12] into F4, then stores the sum.
+# Bne outcomes: taken, taken, taken, not taken (byte offset -16: back to
+# Ld F2). The BTB misses on the first Bne (predicted not-taken:
+# mispredict, the speculative Sd is squashed before it reaches memory) and
+# predicts taken on the last one (mispredict), so there are two recoveries.
+               # of rs   Cycles in EX   Cycles in Mem   # of FUs
+Integer adder     4          1                             1
+FP adder          3          3                             1
+FP multiplier     2         10                             1
+Load/store unit   4          1              4              1
+
+ROB entries = 16
+Issue width = 1
+R1=0, R3=16
+Mem[0]=1.0, Mem[4]=2.0, Mem[8]=3.0, Mem[12]=4.0
+
+Ld F2 0(R1)
+Add.d F4 F4 F2
+Addi R1 R1 4
+Bne R1 R3 -16
+Sd F4 0(R3)

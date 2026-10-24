@@ -1,0 +1,526 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage[numbers]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  breaklines=true,
+}
+\newcommand{\code}[1]{\texttt{#1}}
+% let the small cycle tables pack onto pages
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.95}
+\renewcommand{\textfraction}{0.03}
+\renewcommand{\floatpagefraction}{0.85}
+\setcounter{topnumber}{4}
+\setcounter{bottomnumber}{4}
+\setcounter{totalnumber}{8}
+% cycle tables: one file per test and width, made from the simulator output in results/
+\newcommand{\cycletable}[1]{{\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/#1}}}
+% one cycle table with a "Width k: n cycles" heading, half the text width
+\newcommand{\widthtable}[3]{\begin{minipage}[t]{0.49\textwidth}\centering
+  {\small Width #2: #3 cycles}\par\smallskip\cycletable{#1}\end{minipage}}
+
+\title{Assignment 2: In-order multi-issue and a branch unit for a Tomasulo simulator with a reorder buffer\\
+  \large COSC 6385 Computer Architecture, Fall 2026}
+\author{Bryan E. Tuck\\University of Houston}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+A Tomasulo machine with a reorder buffer (ROB) renames registers at issue, lets instructions
+execute as soon as their operands arrive, and commits them in program order \cite{lec8,lec9}.
+The starter code for this assignment \cite{assignment} issues one instruction per cycle and
+stops fetching at every branch until the branch has executed. The assignment asks for in-order multi-issue, up to \code{issue\_width}
+instructions (1 to 4, default 1) entering the ROB and the reservation stations in the same
+cycle, with the width set by an \code{Issue width = N} line in the input file. The handout
+also describes the branch unit the machine should have: a one-bit predictor with an 8-entry
+branch target buffer (BTB), prediction at ISSUE, resolution at the end of EX, and recovery
+from a misprediction detected in cycle $n$ with correct fetch resuming in cycle $n+2$. The
+starter has no predictor or BTB (its README says so), so I added them.
+
+With more than one instruction issuing per cycle, the instructions in a group are
+renamed one after another, so a later instruction reads the ROB tag an earlier one just
+wrote into the register alias table (RAT) instead of the stale value behind it
+\cite[slide~13, ``Intra-group dependencies'']{lec9}. The group stops at the first
+instruction that finds no free ROB entry, reservation station or load/store queue slot, and
+everything behind it waits. Several instructions can become ready in the same cycle;
+the single CDB broadcasts one result per cycle, while the commit stage may retire a whole
+group. Instructions also issue past an unresolved branch, so a misprediction leaves
+wrong-path instructions in the ROB, the reservation stations, the functional units, the
+result queue and the load/store queue, and recovery has to remove all of them and
+restore the RAT.
+
+I added the multi-issue logic to \code{issue.py}, a parser (\code{parse\_input.py}) for
+the handout's input format, the branch unit (\code{branch.py}), and the register and memory
+dump of the handout's output format. The commit stage retires up to \code{issue\_width}
+ready instructions per cycle, the commit width of the course's sample report and two-issue
+example \cite{sample,oooexample}, and there is one common data bus (CDB), as the handout
+specifies. On eight independent
+instructions the cycle count falls from 20 at width 1 to 14 at width 4; on a six-instruction
+RAW chain it stays at 26 at every width; on every test the final registers and memory are
+the same at every width and equal to the values computed by hand.
+
+\section{Pipeline model}
+\label{sec:model}
+
+The machine has the five stages of the handout: ISSUE (fetch, decode, rename), EX, MEM,
+WB and COMMIT. Table~\ref{tab:timing} lists the timing rules the simulator follows, including
+the changes to the starter described in Section~\ref{sec:changes}. As in the course's
+walk-through examples \cite{oooexample}, an instruction issued in cycle $c$ executes from
+$c+1$, writes back the cycle after it finishes, and commits the cycle after it writes back.
+The two-issue example there broadcasts two results per cycle; the handout specifies one CDB,
+so this simulator broadcasts one.
+
+\begin{table}[htbp]
+\centering
+\caption{Timing rules. $c$ is the cycle in which the event in the left column happens.}
+\label{tab:timing}
+\small
+\begin{tabular}{@{}p{0.34\textwidth}p{0.6\textwidth}@{}}
+\toprule
+Event & Rule \\
+\midrule
+Issue in cycle $c$ & Up to \code{issue\_width} instructions per cycle in program order; EX can start in $c+1$. A reservation station is free again the cycle after its instruction starts EX. \\
+Operands arrive on the CDB in $c$ & EX can start in $c+1$; the oldest ready instruction in a reservation station goes first. \\
+Integer adder, address adder & Unpipelined: a unit that finishes in $c$ takes a new instruction in $c+1$. \\
+FP adder, FP multiplier & Pipelined: one new instruction per cycle per unit. \\
+Result produced in $c$ & Broadcast on the single CDB in $c+1$ at the earliest; results queue in completion order, and results produced in the same cycle queue in stage order (EX before MEM). \\
+Load address known in $c$ & Memory access from $c+1$ if every older store's address is known and none matches; store-to-load forwarding takes one MEM cycle ($c+1$) when the nearest older store with the same address has its data. \\
+Load/store queue & A load leaves the queue when its data returns, from memory or from a store; a store leaves when its memory write ends. The slot can be reused from the next cycle. \\
+Memory port & Single, non-pipelined; a load that can use the port takes it before a store that is ready to commit in the same cycle, and a committing store waits for a load that already holds it. \\
+Commit & Up to \code{issue\_width} ROB-head entries per cycle, in order, stopping at the first that is not ready. An instruction commits at the earliest in the cycle after its write-back (a branch, after it resolves); a store commits once its address and data are known and the port is free, and starts its memory write in its commit cycle. A ROB entry can be reused in its commit cycle. \\
+Branch issued in $c$ & Predicted from the BTB at issue; fetch continues from the predicted target in $c$ (fall-through) or $c+1$ (taken). Resolved at the end of EX. \\
+Misprediction detected in $n$ & Wrong-path instructions are squashed and the RAT restored; no issue in $n+1$; issue from the correct target in $n+2$. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{What I added}
+\label{sec:changes}
+
+\subsection{Input file and output}
+
+The original \code{main.py} hard-coded the reservation-station counts, latencies, ROB size
+and the initial registers and memory, and read a bare list of instructions from
+\code{code.in}. \code{parse\_input.py} reads the handout's format instead: the
+functional-unit table, \code{ROB entries}, \code{Issue width}, register and memory initial
+values, and the program. Matching is case-insensitive, commas are optional, a line starting
+with \code{\#} or \code{//} is a comment, and a missing configuration line keeps the
+starter's hard-coded value (the issue width defaults to 1). The decoder in \code{init.py}
+replaces the starter's \code{split(\textquotesingle\ \textquotesingle)} on raw text with an
+\code{instruction} record, which also fixes two-digit register numbers such as \code{R10},
+and accepts \code{Beq}, which the starter lacked. \code{main.py} takes the input path on the
+command line and still defaults to \code{code.in}, which now holds the original program with
+the formerly hard-coded configuration; \code{-{}-issue-width N} overrides the file's width,
+so each test file runs at all four widths without a copy per width. All simulator state now
+lives in one \code{machine} object (\code{machine.py}) built from the parsed configuration,
+and each stage function takes it as its argument instead of the starter's long argument
+lists. After the cycle table, which keeps the starter's format, \code{main.py} prints a
+second table with the squashed wrong-path instructions, then the \code{REGISTER VALUES} and
+\code{NON-ZERO MEMORY VALUES} sections of the handout. Two summary lines follow with the issue
+width, the number of committed instructions, the cycle count, the IPC, and the branch and
+misprediction counts. The cycle count is the last cycle in which anything happened; for a
+program ending in a store, that is the last cycle of the memory write.
+
+\subsection{Multi-issue}
+\label{sec:issue}
+
+\code{issue()} in \code{issue.py} loops up to \code{issue\_width} times per cycle. Each
+iteration takes the instruction at the program counter, checks that the ROB has a free
+entry and that its reservation station (or the load/store queue) has a free slot, and if so
+allocates the ROB entry, reads both operands through the RAT, writes the entry into the
+station, and finally points the RAT entry of the destination register at the new ROB tag.
+Because the RAT is updated before the next instruction of the group reads it, an intra-group
+RAW dependence is renamed correctly. In \code{t2\_raw\_chain} at width 4, the second
+\code{Add.d F1 F1 F2} issued in cycle 1 waits on the tag \code{ROB0} of the first rather than
+on the initial value of \code{F1}, and the six instructions still take 26 cycles. The loop
+stops at the first instruction that finds no space, so the group is in order and nothing
+behind a stalled instruction issues ahead of it; the \code{t3\_structural} test exercises both
+a full reservation station and a full ROB. A branch is predicted when it issues
+(Section~\ref{sec:branch}); a predicted-taken branch ends the group, because fetch has to be
+redirected, while a predicted-not-taken one lets the group continue with the fall-through
+instruction.
+
+Two changes elsewhere were needed before a width above 1 gave correct results. First, the
+starter's CDB broadcast wrote the result value into the RAT unconditionally. With two
+writers of the same register in flight at once, which multi-issue makes common, the
+older writer's broadcast overwrote the younger writer's ROB tag, and a later reader picked up
+a stale value. \code{wb.py} now writes the RAT only when the RAT entry still holds the
+broadcasting tag, which is the rule on slide 34 of Lecture~8 \cite{lec8}. Second, the
+starter dispatched the lowest-numbered ready entry of a reservation station, which is not
+always the oldest. \code{exe.py} now picks the oldest ready entry by ROB
+order, and only among instructions issued in an earlier cycle, so EX starts at $c+1$ as in
+Table~\ref{tab:timing}. The same file limits the unpipelined integer adder to one instruction
+in flight and lets the pipelined FP units accept one new instruction per cycle; the starter
+advanced every entry of every unit each cycle, which pipelines the integer adder when its
+latency is above 1.
+
+\subsection{Commit and the CDB}
+
+The commit stage retires up to \code{issue\_width} entries per cycle from the ROB head, in
+order, and stops at the first entry that is not ready: an ALU or load result must have been
+broadcast, a store must have its address, its data and a free memory port, and a branch must
+have resolved. The commit width follows the issue width, as in the course's sample report
+and two-issue example \cite{sample,oooexample}; it is not a separate setting. If commit stayed at one per cycle, the ROB
+would fill behind any long-latency instruction and issue would then run at one per cycle
+too. A mispredicted branch never brings wrong-path instructions into a commit
+group, because the squash happens in the EX stage of the cycle in which the branch resolves,
+before the commit stage runs, and the branch is marked ready only then. By the time it
+reaches the head, everything younger than it on the wrong path is gone. Stores still
+serialize on the single memory port, so two stores never commit in the same cycle. The
+sample report also broadcasts \code{issue\_width} results per cycle; the handout specifies
+one CDB, so I kept one. Results enter a queue in the cycle they are produced and the oldest
+queued result is broadcast each cycle. Instructions that write a register therefore pass the
+CDB one per cycle, and no test reaches an IPC of 1 (Section~\ref{sec:results}).
+
+\subsection{Branch unit}
+\label{sec:branch}
+
+\code{branch.py} holds the predictor, the BTB and the recovery. The BTB has eight entries
+indexed by the low three bits of the branch's word address (its index in the program;
+the byte PC is four times that). Each entry stores the branch's PC as a tag, the target it
+last jumped to, and one bit with its last outcome, which is the one-bit predictor. When a
+branch issues, \code{issue()} looks it up. A valid entry with a matching tag and a set bit
+predicts taken with the stored target; anything else predicts not-taken. The predicted next
+PC is recorded in the ROB entry together with a checkpoint of both RATs, and fetch continues
+along the predicted path. The branch itself goes into an integer-adder reservation station
+like an \code{Add}, with the two registers to compare as its operands.
+
+At the end of EX, \code{resolve\_branch} compares the operands (\code{Beq} or \code{Bne}),
+computes the real target, updates the BTB entry with the outcome and target, and compares
+them with the prediction. If both agree the branch is marked ready and commits in order
+later. If not, the misprediction is handled in the same cycle $n$ in the three steps the
+handout lists. First, every ROB entry younger than the branch is popped from the tail, and
+with it everything that belongs to those instructions. Their reservation-station entries
+are freed, which clears the wait-for tags, and their entries in the functional units, the
+results queue, the load/store queue, the address adder and the memory port are dropped. The
+ROB tail pointer moves back to the slot after the branch, so tags are not duplicated. A store
+that has already committed is never squashed. It keeps its queue entry and finishes its
+memory write, even when the ROB tag it had now belongs to a wrong-path instruction.
+Second, the RAT is restored from the checkpoint taken at issue. A checkpointed entry may hold
+a tag of an instruction that broadcast after the checkpoint (its value is taken from the ROB
+entry) or that has already committed (the architectural register is taken), so the restored
+RAT is consistent with the machine's state in cycle $n$ rather than in the issue cycle. Third,
+the program counter is set to the correct target and issue is blocked for cycle $n+1$, so the
+first correct-path instruction issues in $n+2$. Squashed instructions appear in a second
+output table with the cycle in which they were squashed. \code{t5\_loop}
+(Section~\ref{sec:tests}) checks the recovery: after two mispredictions, every register and
+memory value is correct.
+
+The branch offset is in bytes and is added to PC + 4, the convention of the starter's test
+case: its \code{Bne R1 R0 -12}, the eighth instruction, goes to the sixth. The handout's
+formula, \code{PC + 4 + (offset <{}< 2)}, would send that branch to byte address $-16$, before
+the start of the program, so I kept the starter's reading, which the provided \code{code.in}
+and \code{test\_case.txt} depend on, and wrote my own loops with multiples of 4. A taken
+branch whose offset is not a multiple of 4 stops the simulation with an error.
+
+\subsection{Loads and stores}
+
+The load/store queue keeps the starter's structure (a FIFO with one address adder and one
+memory port) with three corrections that the forwarding test exposed. The starter sent a store
+to memory as soon as it reached the head of the queue with its data, before its turn to
+commit, because its commit check was a function object that was never called; with
+speculation this would let a wrong-path store write memory. Stores now go to memory from
+\code{commit.py} when they are the ROB head, as the handout requires, and the queue entry
+stays until the write completes so that a younger load to the same address can still forward
+from it. The forwarding check looked only at the nearest older store, whatever its address;
+it now walks the older stores from nearest to farthest, forwards from the first one with the
+same address, waits at a store whose address or data is unknown, and otherwise lets the load
+read memory. Forwarding takes one MEM cycle and a memory access starts the cycle after the
+address is known, so both paths start MEM in the same cycle. Finally, the ``already has
+data'' test that gated loads read the queue head instead of the load's own entry, which
+blocked every load behind a store that was holding data. A load also keeps its queue entry
+until its data returns, from memory or from a store, as the handout specifies; the starter
+freed the entry as soon as the load entered the memory port.
+
+\section{Test cases}
+\label{sec:tests}
+
+Each test is an input file in \code{tests/}; Table~\ref{tab:tests} lists what each one
+exercises and the final state it must produce, which I computed by hand from the program.
+Every test runs at widths 1, 2, 3 and 4 with \code{-{}-issue-width}, and the outputs are in
+\code{results/}, one file per test and width; Appendix~\ref{sec:appendix} has all 32 cycle
+tables. All of them use one unit of each type,
+a 1-cycle integer adder, a 3-cycle FP adder, a 10-cycle FP multiplier (20 in the handout's
+sample) and a 4-cycle memory, except \code{original\_code\_in}, which keeps the starter's
+configuration (4-cycle FP adder, 15-cycle multiplier, 5-cycle memory, 64-entry ROB).
+
+\begin{table}[htbp]
+\centering
+\caption{Test programs. The last column is the hand-computed final state that every width must produce.}
+\label{tab:tests}
+\small
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{0.47\textwidth}>{\raggedright\arraybackslash}p{0.28\textwidth}@{}}
+\toprule
+Test & What it exercises & Final state \\
+\midrule
+\code{original\_code\_in} & The starter's program (\code{code.in}, same as \code{test\_case.txt}): a loop whose \code{Bne R1 R0 -12} jumps back two instructions, so the body repeats only the two \code{Addi}s. Three branches, two mispredicted (BTB miss on the first, fall-through on the last). & R1=0, R2=20, F2=1, F4=3, F6=7, F20=2, Mem[32]=7 (the values the starter computes) \\
+\code{spec\_sample} & The handout's sample configuration and program (20-cycle multiplier, 128-entry ROB). As printed the loop never ends (R2 stays 20, R3 is 0), so one \code{Addi R2 R2 -10} counts R2 down and the \code{Bne} is taken once; both branches are mispredicted. & R2=0, F1=30.1, F4=0 (Mem[18] is 0) \\
+\code{t1\_independent} & Eight instructions with no dependences: two loads and six ALU instructions (\code{Add}, \code{Sub}, \code{Addi}, \code{Add.d}, \code{Sub.d}, \code{Mult.d}) spread over the three ALUs. Shows the gain from issue width and the commit and CDB limits. & F5=10, F6=20, F7=3, F8=12, R5=12, R6=$-4$, F9=3, R7=112 \\
+\code{t2\_raw\_chain} & Six \code{Add.d F1 F1 F2} in a row, each dependent on the previous one (six FP adder stations, so only the dependence limits it). & F1=4.0 \\
+\code{t3\_structural} & One FP multiplier station and a 4-entry ROB: the second and third \code{Mult.d} wait for the station; \code{Add.d F7} and the three \code{Addi} wait for ROB entries. & F3=F4=F5=6, F6=F7=5, R1=5, R2=6, R3=7 \\
+\code{t4\_forwarding} & Store-to-load forwarding (\code{Ld F4}, \code{Ld F6}, \code{Ld F7}), a load that bypasses an older store to another address (\code{Ld F5}), and loads that wait for an older store's data (\code{Ld F4}, \code{Ld F7}). & F2=1, F3=6, F4=6, F5=2, F6=5, F7=6, Mem[8]=6, Mem[16]=5 \\
+\code{t5\_loop} & A four-iteration loop that sums Mem[0..12] into F4 and stores the sum; \code{Bne R1 R3 -16} is taken three times. The first \code{Bne} misses in the BTB and the last is predicted taken, so two recoveries; the \code{Sd} issued down the wrong path must not reach memory. & R1=16, F4=10, Mem[16]=10 \\
+\code{t6\_beq\_mispredict} & \code{Beq} taken on a BTB miss (the skipped \code{Addi R4} issues and is squashed), \code{Beq} not taken, and \code{Sub}, \code{Sub.d}, \code{Mult.d}. & R4=0, R5=2, F3=1, F4=6, R6=1, R7=3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Hand check of a multi-issue table.} Table~\ref{tab:t1w4} is \code{t1\_independent}
+at width 4, checked against the rules of Table~\ref{tab:timing}. In cycle 1 the first four
+instructions issue (the load/store queue has three slots, the FP adder three stations, the
+multiplier two). The remaining four issue in cycle 2 (the integer adder has four stations).
+\code{Ld F5} computes its address in cycle 2 on the single address adder and holds the memory
+port in cycles 3 to 6; \code{Ld F6} gets the adder in cycle 3 and the port in cycles 7 to 10.
+\code{Add.d F7} and \code{Mult.d F8} start in cycle 2 (issued in cycle 1). Of the integer
+instructions issued in cycle 2, \code{Add R5}, \code{Sub R6} and \code{Addi R7} take the
+unpipelined adder one per cycle in cycles 3, 4 and 5; \code{Sub.d F9} enters the pipelined
+FP adder in cycle 3 behind \code{Add.d F7}. The WB column is the CDB queue: \code{Add R5}
+finishes in 3 and broadcasts in 4, \code{Add.d F7} finishes in 4 and broadcasts in 5,
+\code{Sub R6} finishes in 4 but waits until 6, \code{Sub.d F9} (done in 5) gets 7, \code{Addi R7}
+(done in 5) gets 8, \code{Ld F5} (data in 6) gets 9, \code{Ld F6} (data in 10) gets 11 and
+\code{Mult.d F8} (done in 11) gets 12. Commit is in order and up to four per cycle:
+\code{Ld F5} in 10; \code{Ld F6} (WB 11) and \code{Add.d F7} (ready since cycle 5) together
+in 12; \code{Mult.d F8} (WB 12), \code{Add R5}, \code{Sub R6} and \code{Sub.d F9} together in
+13, a full group of four; \code{Addi R7} in 14. Width 1
+(\code{results/t1\_independent.w1.txt}) issues the same instructions over cycles 1 to 8 and
+finishes in 20. Of the six cycles saved, three come from issue. \code{Mult.d F8} issues in
+cycle 1 instead of 4, so it writes back in 12 instead of 15. The other three come from
+commit. At width 1 the four instructions behind \code{Mult.d F8} commit one per cycle in
+cycles 17 to 20, while at width 4 three of them commit with it in cycle 13 and the last in 14.
+
+\paragraph{Hand check of a misprediction.} Table~\ref{tab:t5w1} is \code{t5\_loop} at
+width 1. The first \code{Bne R1 R3 -16} issues in cycle 4 and finds no BTB entry, so it is
+predicted not-taken and the fall-through \code{Sd F4 0(R3)} issues in cycle 5 and even
+computes its address in cycle 6. The branch waits for \code{Addi R1}, whose result is
+broadcast in cycle 5, executes in cycle 6 and finds $\code{R1}=4\neq16$: taken, a
+misprediction detected in $n=6$. In that cycle the \code{Sd} is squashed (first row of the
+squashed table, cycle 6), its load/store queue entry is dropped, the RAT checkpoint is
+restored, and the BTB entry for word address 3 is written with ``taken, target 0''. Nothing
+issues in cycle 7, and the correct \code{Ld F2 0(R1)} issues in cycle $n+2=8$. The second
+\code{Bne} (issue 11) hits in the BTB, is predicted taken, and the next \code{Ld F2} issues
+in cycle 12 with no bubble; the branch resolves in 13 and agrees. The fourth \code{Bne}
+(issue 19) is predicted taken but falls through ($\code{R1}=16$): detected in cycle 21, the
+\code{Ld F2} issued in 20 and the \code{Add.d} issued in 21 are squashed, and the
+\code{Sd F4} that follows the loop issues in cycle 23. The store commits in 31 and writes
+Mem[16]~=~10.0 in cycles 31 to 34, the sum of the four loads. No wrong-path store reached
+memory, and the correct-path instructions read the right operands from the restored RAT.
+
+\begin{table}[htbp]
+\centering
+\begin{minipage}[t]{0.49\textwidth}
+\centering
+\caption{\code{t1\_independent}, width 4: 14 cycles.}
+\label{tab:t1w4}
+\cycletable{t1_independent.w4}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+\centering
+\caption{\code{t5\_loop}, width 1: 34 cycles, two mispredictions.}
+\label{tab:t5w1}
+\cycletable{t5_loop.w1}
+\end{minipage}
+\end{table}
+
+\section{Results under each issue width}
+\label{sec:results}
+
+Table~\ref{tab:summary} gives the cycle count, IPC, branch count and misprediction count of
+every test at widths 1 to 4; the final registers and memory are identical at every width
+for every test and match Table~\ref{tab:tests}. On \code{original\_code\_in} they are the
+values the unmodified starter computes, and the rows before the first branch are identical
+to the starter's cycle table; from the first branch on the predictor changes the timing
+(Table~\ref{tab:orig} in the appendix).
+
+\begin{table}[htbp]
+\centering
+\caption{Cycles, IPC, branches and mispredictions per test and issue width (commit width =
+issue width, one CDB). Final registers and memory are the same at every width.}
+\label{tab:summary}
+\small
+\input{tables/summary_widths}
+\end{table}
+
+\code{t1\_independent} gains the most. It drops from 20 to 16, 15 and
+14 cycles as the width grows, because the eight instructions issue in 8, 4, 3 and 2 cycles
+and the commits at the end go out in groups (hand check above). The RAW chain of
+\code{t2\_raw\_chain} takes 26 cycles at every width, because each \code{Add.d} waits for
+the previous broadcast, executes for 3 cycles and broadcasts the cycle after, so the chain
+costs 4 cycles per link regardless of how early the links issued. \code{t3\_structural}
+improves by one cycle only, from 22 to 21, because the single multiplier station and the
+4-entry ROB block issue most of the time. The one cycle comes from commit. At width 2
+\code{Mult.d F5} and \code{Add.d F6} commit together in cycle 17, so every later commit
+moves one cycle earlier. At width 2 \code{Add.d F6} also issues in cycle 5 instead of 6, but
+that only moves its own EX and WB, which finish long before it can commit.
+\code{t4\_forwarding} goes from 21 to 19 cycles. One cycle comes from issue. At widths 2 to
+4 \code{Ld F6} forwards in cycle 8 instead of 11, which leaves the CDB free for \code{Ld F4}
+in cycle 13 instead of 14. The other comes from commit. At width 1 the entries ahead of the
+second store retire one per cycle (\code{Ld F4}, \code{Ld F5}, \code{Addi R3} in cycles 15
+to 17) and \code{Sd F1} starts its write in cycle 18; at width 4 they retire together in
+cycle 14 and the write starts in cycle 16, as soon as the port is free.
+
+In \code{t5\_loop} the first and last
+\code{Bne} are mispredicted and the middle two are predicted correctly; the cycle count
+goes from 34 to 31, 30 and 29; each iteration's \code{Bne} depends on its \code{Addi}, and
+after each misprediction the pipeline refills.
+\code{spec\_sample} and \code{t6\_beq\_mispredict} show the same pattern (19 to 13 and 21
+to 16). On \code{original\_code\_in} the simulator takes 42 cycles at width 1 against the
+starter's 39. The three branches now commit in order and take a commit cycle each at width
+1, where the starter dropped a resolved branch from the ROB without one, and that is the
+whole difference at the back end; at the front end the two mispredictions each cost one more
+cycle than the starter's stall (fetch resumes in $n+2$ instead of $n+1$) and the correctly
+predicted middle branch saves one, so the final \code{Add.d F20} issues in cycle 19 instead
+of 18. At widths 2 to 4 (35, 34, 34 cycles) the branches commit in the same group as their
+neighbours and the issue stage is no longer the limit; the 15-cycle multiplier on the
+critical path is. More squashed instructions at the wider widths (4 against 2 on the
+original program, 6 against 3 on \code{t5\_loop}) are the wrong-path instructions a wider
+front end fetches before the branch resolves.
+
+\section{What works and what does not}
+\label{sec:works}
+
+The features the handout asks for are implemented and tested: issue widths 1 to 4 from the
+input file (or the command line); intra-group renaming; in-order stall at a full ROB, reservation station or load/store queue;
+commit of up to \code{issue\_width} instructions per cycle; one CDB; the one-bit predictor
+and 8-entry BTB with prediction at
+issue; misprediction recovery with the $n+2$ restart, including a wrong-path store that is
+squashed before it reaches memory; loads and stores with forwarding; \code{Beq} and
+\code{Bne}; the handout's input and output formats. All eight tests give the same final
+state at every width, and the hand checks above agree with the simulator.
+
+Some choices are not fixed by the handout. The commit width equals the issue width, as in
+the sample report, and is not a separate parameter. There is one CDB, granted in completion
+order, so IPC stays below 1 on every test. Branch offsets are byte offsets
+(Section~\ref{sec:branch}). The handout says a load goes to memory when no matching store is
+found or when older store addresses are still unresolved. Taken literally, a load could then
+read memory before an older store to the same address writes it, and the handout gives no
+way to replay the load, so here a load waits until every older store's address is known, as
+in the starter. A BTB entry is used only when its tag matches, so two branches
+that share an index evict each other rather than share a prediction, and a wrong-path branch
+that resolves before the older branch does updates the BTB. The ``number of FUs'' column
+applies to the three ALUs; the memory stays single-ported whatever the load/store unit's
+count says, and at most one store-to-load forward happens per cycle. Memory is 256 entries
+indexed by byte address; a load or store moves one value at that address and no alignment is
+checked. Squashed instructions are listed separately, so the main table is the committed
+program in order. The sample report \cite{sample} broadcasts \code{issue\_width} results per
+cycle and has no predictor, so its cycle tables are not comparable with these.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\section{Cycle tables at every width}
+\label{sec:appendix}
+
+These tables show every test at widths 1 to 4, as printed by the simulator (the files in
+\code{results/}). Squashed instructions are listed under each table, with the cycle in which
+they were squashed in the last column.
+
+\begin{table}[htbp]
+\centering
+\caption{\code{original\_code\_in} at widths 1 to 4.}
+\label{tab:orig}
+\widthtable{original_code_in.w1}{1}{42}\hfill
+\widthtable{original_code_in.w2}{2}{35}
+
+\bigskip
+\widthtable{original_code_in.w3}{3}{34}\hfill
+\widthtable{original_code_in.w4}{4}{34}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{\code{spec\_sample} at widths 1 to 4.}
+\widthtable{spec_sample.w1}{1}{19}\hfill
+\widthtable{spec_sample.w2}{2}{15}
+
+\bigskip
+\widthtable{spec_sample.w3}{3}{13}\hfill
+\widthtable{spec_sample.w4}{4}{13}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{\code{t1\_independent} at widths 1 to 4.}
+\widthtable{t1_independent.w1}{1}{20}\hfill
+\widthtable{t1_independent.w2}{2}{16}
+
+\bigskip
+\widthtable{t1_independent.w3}{3}{15}\hfill
+\widthtable{t1_independent.w4}{4}{14}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{\code{t2\_raw\_chain} at widths 1 to 4.}
+\widthtable{t2_raw_chain.w1}{1}{26}\hfill
+\widthtable{t2_raw_chain.w2}{2}{26}
+
+\bigskip
+\widthtable{t2_raw_chain.w3}{3}{26}\hfill
+\widthtable{t2_raw_chain.w4}{4}{26}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{\code{t3\_structural} at widths 1 to 4.}
+\widthtable{t3_structural.w1}{1}{22}\hfill
+\widthtable{t3_structural.w2}{2}{21}
+
+\bigskip
+\widthtable{t3_structural.w3}{3}{21}\hfill
+\widthtable{t3_structural.w4}{4}{21}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{\code{t4\_forwarding} at widths 1 to 4.}
+\widthtable{t4_forwarding.w1}{1}{21}\hfill
+\widthtable{t4_forwarding.w2}{2}{19}
+
+\bigskip
+\widthtable{t4_forwarding.w3}{3}{19}\hfill
+\widthtable{t4_forwarding.w4}{4}{19}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{\code{t5\_loop} at widths 1 to 4.}
+\widthtable{t5_loop.w1}{1}{34}\hfill
+\widthtable{t5_loop.w2}{2}{31}
+
+\bigskip
+\widthtable{t5_loop.w3}{3}{30}\hfill
+\widthtable{t5_loop.w4}{4}{29}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{\code{t6\_beq\_mispredict} at widths 1 to 4.}
+\widthtable{t6_beq_mispredict.w1}{1}{21}\hfill
+\widthtable{t6_beq_mispredict.w2}{2}{18}
+
+\bigskip
+\widthtable{t6_beq_mispredict.w3}{3}{17}\hfill
+\widthtable{t6_beq_mispredict.w4}{4}{16}
+\end{table}
+
+
+\end{document}

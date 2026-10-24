@@ -1,0 +1,31 @@
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Instruction & ISSUE & EX & MEM & WB & COMMIT \\
+\midrule
+\code{Ld F2 0(R1)} & 1 & 2--2 & 3--6 & 7 & 8 \\
+\code{Add.d F4 F4 F2} & 1 & 8--10 &  & 11 & 12 \\
+\code{Addi R1 R1 4} & 1 & 2--2 &  & 3 & 12 \\
+\code{Bne R1 R3 -16} & 1 & 4--4 &  &  & 12 \\
+\code{Ld F2 0(R1)} & 6 & 7--7 & 8--11 & 13 & 14 \\
+\code{Add.d F4 F4 F2} & 6 & 14--16 &  & 17 & 18 \\
+\code{Addi R1 R1 4} & 6 & 7--7 &  & 8 & 18 \\
+\code{Bne R1 R3 -16} & 6 & 9--9 &  &  & 18 \\
+\code{Ld F2 0(R1)} & 7 & 9--9 & 12--15 & 16 & 18 \\
+\code{Add.d F4 F4 F2} & 7 & 18--20 &  & 21 & 22 \\
+\code{Addi R1 R1 4} & 7 & 10--10 &  & 12 & 22 \\
+\code{Bne R1 R3 -16} & 7 & 13--13 &  &  & 22 \\
+\code{Ld F2 0(R1)} & 8 & 13--13 & 16--19 & 20 & 22 \\
+\code{Add.d F4 F4 F2} & 9 & 22--24 &  & 25 & 26 \\
+\code{Addi R1 R1 4} & 9 & 14--14 &  & 15 & 26 \\
+\code{Bne R1 R3 -16} & 10 & 16--16 &  &  & 26 \\
+\code{Sd F4 0(R3)} & 18 & 19--19 & 26--29 &  & 26 \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Squashed (last column: cycle squashed)}} \\
+\emph{\code{Sd F4 0(R3)}} & 2 & 3--3 &  &  & 4 \\
+\emph{\code{Ld F2 0(R1)}} & 16 &  &  &  & 16 \\
+\emph{\code{Bne R1 R3 -16}} & 15 &  &  &  & 16 \\
+\emph{\code{Addi R1 R1 4}} & 15 &  &  &  & 16 \\
+\emph{\code{Add.d F4 F4 F2}} & 15 &  &  &  & 16 \\
+\emph{\code{Ld F2 0(R1)}} & 11 & 16--16 &  &  & 16 \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,16 @@
+\begin{tabular}{@{}lrrrrrrrrrrr@{}}
+\toprule
+& & \multicolumn{4}{c}{Cycles} & \multicolumn{4}{c}{IPC} & & \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+Test & Instr. & 1 & 2 & 3 & 4 & 1 & 2 & 3 & 4 & Br. & Mispr. \\
+\midrule
+\code{original\_code\_in} & 15 & 42 & 35 & 34 & 34 & 0.36 & 0.43 & 0.44 & 0.44 & 3 & 2 \\
+\code{spec\_sample} & 8 & 19 & 15 & 13 & 13 & 0.42 & 0.53 & 0.62 & 0.62 & 2 & 2 \\
+\code{t1\_independent} & 8 & 20 & 16 & 15 & 14 & 0.40 & 0.50 & 0.53 & 0.57 & 0 & 0 \\
+\code{t2\_raw\_chain} & 6 & 26 & 26 & 26 & 26 & 0.23 & 0.23 & 0.23 & 0.23 & 0 & 0 \\
+\code{t3\_structural} & 8 & 22 & 21 & 21 & 21 & 0.36 & 0.38 & 0.38 & 0.38 & 0 & 0 \\
+\code{t4\_forwarding} & 9 & 21 & 19 & 19 & 19 & 0.43 & 0.47 & 0.47 & 0.47 & 0 & 0 \\
+\code{t5\_loop} & 17 & 34 & 31 & 30 & 29 & 0.50 & 0.55 & 0.57 & 0.59 & 4 & 2 \\
+\code{t6\_beq\_mispredict} & 7 & 21 & 18 & 17 & 16 & 0.33 & 0.39 & 0.41 & 0.44 & 2 & 1 \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,23 @@
+# Independent instructions: no data dependences, so the limits are the issue
+# and commit width, the single CDB, the single integer adder and address
+# adder, and the single memory port.
+               # of rs   Cycles in EX   Cycles in Mem   # of FUs
+Integer adder     4          1                             1
+FP adder          3          3                             1
+FP multiplier     2         10                             1
+Load/store unit   3          1              4              1
+
+ROB entries = 16
+Issue width = 1
+R1=4, R2=8, R3=12, R4=16
+F1=1.0, F2=2.0, F3=3.0, F4=4.0
+Mem[4]=10, Mem[8]=20
+
+Ld F5 0(R1)
+Ld F6 0(R2)
+Add.d F7 F1 F2
+Mult.d F8 F3 F4
+Add R5 R1 R2
+Sub R6 R3 R4
+Sub.d F9 F4 F1
+Addi R7 R3 100

@@ -1,0 +1,27 @@
+                              ISSUE          EXE            MEM            WB             COMMIT         
+Add.d F1 F2 F3                [1]            [2, 4]         []             [5]            [6]
+Ld F4 8(R1)                   [1]            [2, 2]         [3, 6]         [7]            [8]
+Addi R2 R2 -10                [2]            [3, 3]         []             [4]            [8]
+Bne R2 R3 -16                 [2]            [5, 5]         []             []             [9]
+Add.d F1 F2 F3                [7]            [8, 10]        []             [11]           [12]
+Ld F4 8(R1)                   [7]            [8, 8]         [9, 12]        [13]           [14]
+Addi R2 R2 -10                [8]            [9, 9]         []             [10]           [14]
+Bne R2 R3 -16                 [8]            [11, 11]       []             []             [15]
+
+SQUASHED INSTRUCTIONS         ISSUE          EXE            MEM            WB             SQUASHED
+Addi R2 R2 -10                [10]           []             []             []             [11]
+Ld F4 8(R1)                   [9]            [10, 10]       []             []             [11]
+Add.d F1 F2 F3                [9]            [10]           []             []             [11]
+
+REGISTER VALUES
+value: R0=0 R1=10 R2=0 R3=0 R4=0 R5=0 R6=0 R7=0 R8=0 R9=0 R10=0 R11=0 R12=0 R13=0 R14=0 R15=0 R16=0 R17=0 R18=0 R19=0 R20=0 R21=0 R22=0 R23=0 R24=0 R25=0 R26=0 R27=0 R28=0 R29=0 R30=0 R31=0
+value: F0=0 F1=30.1 F2=30.1 F3=0 F4=0 F5=0 F6=0 F7=0 F8=0 F9=0 F10=0 F11=0 F12=0 F13=0 F14=0 F15=0 F16=0 F17=0 F18=0 F19=0 F20=0 F21=0 F22=0 F23=0 F24=0 F25=0 F26=0 F27=0 F28=0 F29=0 F30=0 F31=0
+
+NON-ZERO MEMORY VALUES
+Addresses   Values
+4           1
+8           2
+12          3.4
+
+Issue width = 2: committed 8 instructions in 15 cycles, IPC = 0.533
+Branches resolved = 2, mispredicted = 2, squashed instructions = 3

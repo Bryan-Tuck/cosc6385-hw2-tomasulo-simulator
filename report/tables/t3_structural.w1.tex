@@ -1,0 +1,14 @@
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Instruction & ISSUE & EX & MEM & WB & COMMIT \\
+\midrule
+\code{Mult.d F3 F1 F2} & 1 & 2--11 &  & 12 & 13 \\
+\code{Mult.d F4 F1 F2} & 3 & 4--13 &  & 14 & 15 \\
+\code{Mult.d F5 F1 F2} & 5 & 6--15 &  & 16 & 17 \\
+\code{Add.d F6 F1 F2} & 6 & 7--9 &  & 10 & 18 \\
+\code{Add.d F7 F1 F2} & 13 & 14--16 &  & 17 & 19 \\
+\code{Addi R1 R0 5} & 15 & 16--16 &  & 18 & 20 \\
+\code{Addi R2 R0 6} & 17 & 18--18 &  & 19 & 21 \\
+\code{Addi R3 R0 7} & 18 & 19--19 &  & 20 & 22 \\
+\bottomrule
+\end{tabular}

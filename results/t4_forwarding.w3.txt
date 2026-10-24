@@ -1,0 +1,22 @@
+                              ISSUE          EXE            MEM            WB             COMMIT         
+Ld F2 0(R1)                   [1]            [2, 2]         [3, 6]         [7]            [8]
+Add.d F3 F2 F1                [1]            [8, 10]        []             [11]           [12]
+Sd F3 0(R1)                   [1]            [3, 3]         [12, 15]       []             [12]
+Ld F4 0(R2)                   [2]            [4, 4]         [12]           [13]           [14]
+Ld F5 8(R1)                   [2]            [5, 5]         [7, 10]        [12]           [14]
+Addi R3 R1 8                  [2]            [3, 3]         []             [4]            [14]
+Sd F1 0(R3)                   [3]            [6, 6]         [16, 19]       []             [16]
+Ld F6 0(R3)                   [3]            [7, 7]         [8]            [9]            [16]
+Ld F7 0(R1)                   [7]            [8, 8]         [13]           [14]           [16]
+
+REGISTER VALUES
+value: R0=0 R1=8 R2=8 R3=16 R4=0 R5=0 R6=0 R7=0 R8=0 R9=0 R10=0 R11=0 R12=0 R13=0 R14=0 R15=0 R16=0 R17=0 R18=0 R19=0 R20=0 R21=0 R22=0 R23=0 R24=0 R25=0 R26=0 R27=0 R28=0 R29=0 R30=0 R31=0
+value: F0=0 F1=5.0 F2=1.0 F3=6.0 F4=6.0 F5=2.0 F6=5.0 F7=6.0 F8=0 F9=0 F10=0 F11=0 F12=0 F13=0 F14=0 F15=0 F16=0 F17=0 F18=0 F19=0 F20=0 F21=0 F22=0 F23=0 F24=0 F25=0 F26=0 F27=0 F28=0 F29=0 F30=0 F31=0
+
+NON-ZERO MEMORY VALUES
+Addresses   Values
+8           6.0
+16          5.0
+
+Issue width = 3: committed 9 instructions in 19 cycles, IPC = 0.474
+Branches resolved = 0, mispredicted = 0, squashed instructions = 0
