@@ -1,6 +1,7 @@
 # COSC 6385 Assignment 2: multi-issue Tomasulo simulator
 
 Bryan E. Tuck, University of Houston, Fall 2026 (Prof. Weidong Shi).
+Repository: https://github.com/Bryan-Tuck/cosc6385-hw2-tomasulo-simulator
 
 `code/` is the course's single-issue Tomasulo simulator (Python, with a reorder
 buffer), extended to issue up to four instructions per cycle in program order and
